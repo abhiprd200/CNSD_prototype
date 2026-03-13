@@ -120,7 +120,7 @@ Research interest: Causal AI, Neuro-Symbolic Systems, Explainable Fault Detectio
 
 ## License
 
-MIT License — open for collaboration and academic use.
+Apache 2.0 License — open for collaboration and academic use.
 
 ---
 
