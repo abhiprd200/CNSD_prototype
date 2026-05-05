@@ -1,132 +1,95 @@
-# Causal-Neuro-Symbolic Diagnosis (CNSD)
-CNSD is a five-layer bidirectional diagnostic framework for industrial fault detection. It goes beyond standard machine learning by not just predicting what fault occurred, but also explaining why, quantifying how much, reasoning about what if, and doing all of this with feedback flowing both forward and backward through the pipeline.
+# CNSD — Causal Neuro-Symbolic Diagnosis
+
+> A framework for interpretable, causally-grounded fault and anomaly diagnosis across mechanical and biomedical signal domains.
 
 ---
 
 ## Overview
 
-**CNSD** is an independent research prototype that combines three powerful AI paradigms into a unified fault detection framework:
+CNSD integrates four computational layers into a single bidirectional architecture:
 
-- 🧠 **Layer 1 — 1D CNN + S-JEPA** — A three-block convolutional neural network processes raw vibration signals directly — no manual feature engineering. Alongside it, a Signal JEPA encoder inspired by Yann LeCun's Joint Embedding Predictive Architecture learns physical state representations in a fully self-supervised manner with zero fault labels. Together they achieve 100% weighted F1 across 10 fault classes on CWRU, and 99.52% F1 via linear probe on JEPA embeddings alone.
-- 🔣 **Layer 2 — Symbolic Rule Engine** — Maps every predicted fault class to a human-readable diagnosis: root cause, severity level (NONE/LOW/MEDIUM/HIGH), and a recommended maintenance action with a concrete timeframe. This transforms a raw class label into something an engineer can act on without any AI knowledge
-- 📐 **Layer 3 — Causal Inference via Pearl's SCM (Rung 2)** — Using the backdoor adjustment criterion from Judea Pearl's Structural Causal Models, CNSD estimates the Average Treatment Effect of vibration energy on fault probability. ATE = 0.3409, validated by a placebo test with a ratio of 29.05× — meaning the real causal signal is 29 times stronger than random noise. Validated also on NASA CMAPSS turbofan data (ATE=0.0546, placebo=25.92×), proving domain-agnostic generalisation.
-Most existing fault detection systems tell you **what** went wrong. CNSD tells you **why** it went wrong — and **what would have prevented it**.
-- 📐 **Layer 3B — Counterfactual Analysis (Rung 3)** — Answers: "What would the fault risk have been if we had intervened earlier?" Three scenarios are computed — 25%, 50%, and 80% vibration reduction — quantifying exactly how much risk each intervention removes. This is Pearl's Rung 3. No prior industrial fault diagnosis system has demonstrated all three rungs simultaneously.
-- 📐 **Layer 4 — Bidirectional Consensus** — All layers feed into a composite scoring mechanism. The feedback runs both ways — causal ATE adjusts CNN confidence thresholds dynamically, symbolic conflicts raise suspicion flags, and counterfactual risk escalates the final consensus. No layer operates in isolation.
+1. **Neural layer** — WDCNN + S-JEPA dual-encoder backbone for signal representation
+2. **Symbolic layer** — Rule engine mapping CNN activations to human-readable fault taxonomy
+3. **Causal layer** — Backdoor-adjusted ATE estimation (Pearl's Rung 2) + DoWhy counterfactuals (Rung 3)
+4. **Consensus layer** — Bidirectional feedback where causal risk history modulates neural confidence thresholds
 
----
+The main novel contribution is **CCR-LoRA** (Causal Consistency Regularized LoRA) — a continual learning method that bounds ATE drift via a causal consistency penalty while allowing partial base network adaptation.
 
-## Architecture
-
-```
-Raw Sensor Data (CWRU Bearing / NASA CMAPSS)
-          |
-          v
-[ Layer 1: 1D CNN + S-JEPA Encoder  ]  -->  F1 = 1.00  |  10 classes  |  JEPA probe = 99.52%
-          |            ^  PATH B: Causal suspicion lowers CNN threshold dynamically
-          v
-[ Layer 2: Symbolic Rule Engine     ]  -->  Root cause  |  Severity  |  Maintenance action
-          |            ^  PATH B: Symbolic conflict raises causal suspicion flag
-          v
-[ Layer 3: Causal Inference (SCM)   ]  -->  ATE = 0.3409  |  Placebo = 29.05x  |  Rung 2
-          |            ^  PATH B: ATE dynamically adjusts CNN confidence threshold
-          v
-[ Layer 3B: Counterfactual          ]  -->  3 intervention scenarios  |  Pearl Rung 3
-          |            ^  PATH B: CF risk multiplier escalates consensus score
-          v
-[ Layer 4: Bidirectional Consensus  ]  -->  Composite score  |  Forward + Backward feedback
-
-```
+| Method | Old-Task Acc | New-Task Acc | ATE Drift |
+|--------|-------------|-------------|-----------|
+| Naive fine-tuning | 0.944 | 1.000 | 0.246 |
+| EWC (λ=100) | 0.965 | 1.000 | 0.340 |
+| Standard LoRA | 0.867 | 0.728 | 0.000 |
+| Hard-freeze CML | 0.858 | 0.731 | 0.000 |
+| **CCR-LoRA (λ=1.0)** | **0.960** | **0.992** | **0.002** |
 
 ---
 
-## Motivation
+## Domains & Datasets
 
-Current neuro-symbolic systems for diagnosis lack **causal grounding**. They detect and classify, but cannot answer interventional questions and lack in the features like: explaining why, quantifying how much, reasoning about what if, and doing all of this with feedback flowing both forward and backward through the pipeline.
+| Dataset | Domain | Confounder | Causal Method | ATE | Placebo Ratio |
+|---------|--------|-----------|--------------|-----|--------------|
+| [CWRU](https://engineering.case.edu/bearingdatacenter) | Rotating machinery | Motor load (HP) | Backdoor OLS | −0.076 | 115× |
+| [NASA CMAPSS FD001](https://www.nasa.gov/content/prognostics-center-of-excellence-data-set-repository) | Turbofan degradation | Operating conditions | Backdoor OLS | 0.204 | 101× |
+| [MIT-BIH Arrhythmia](https://physionet.org/content/mitdb/) | Cardiac ECG (3-class) | RR interval | Backdoor OLS | 0.027 | 4.4× |
+| [MFPT](https://www.mfpt.org/fault-data-sets/) | Bearing (harder benchmark) | Shaft RPM | Backdoor OLS | — | — |
 
-
-Pearl's do-calculus provides the formal framework to answer these questions. CNSD embeds this framework directly into the neuro-symbolic pipeline.
-
----
-
-## Some valuable stats
-
-| Metric | Value |
-|---|---|
-| RF baseline F1 (CWRU) | 94% |
-| 1D CNN F1 (CWRU) | 100% |
-| S-JEPA linear probe F1 | 99.52% (zero labels) |
-| Causal ATE (CWRU CNN) | 0.3409 |
-| Placebo ratio (CWRU) | 29.05x |
-| Causal ATE (CMAPSS) | 0.0546 |
-| Placebo ratio (CMAPSS) | 25.92x |
-| RUL prediction RMSE | 41.35 cycles |
-| Pearl Rungs | All 3 |
-| Bidirectional paths | 2 |
-| Labels used by JEPA | Zero |
-| Datasets validated | 2 |
-
+All datasets are downloaded automatically at runtime. No raw data is stored in this repository.
 
 ---
 
-## Tech Stack
+## Key Results
 
-| Tool | Role |
-|---|---|
-| `Python 3.10+` | Core language |
-| `PyTorch` | Neural perception layer |
-| `DoWhy` | Causal inference & do-calculus |
-| `causalnex` | Causal DAG construction |
-| `pyDatalog` | Symbolic reasoning layer |
-| `pandas / numpy` | Data processing |
-
----
-
-## Dataset
-
-Currently prototyping on the **CWRU Bearing Fault Dataset** (Case Western Reserve University) — a standard benchmark for mechanical fault detection in rotating machinery and **NASA CMAPSS (Commercial Modular Aero-Propulsion System Simulation)** - Industrial benchmarks for fault detection of turbofan jet engines.
+- **CWRU cross-load F1: 0.9994** — including OR_021 (class 9), which IRM fails completely (recall=0.00)
+- **CCR-LoRA ATE drift: 0.002** — 68× lower than EWC while maintaining competitive accuracy on both old and new tasks
+- **Causal consistency across 3 domains** — backdoor identification significant (p<0.001) in all mechanical and biomedical domains
+- **Proposition A** — bidirectional consensus improves reliability score (0.839 vs 0.827 forward-only, Spearman ρ=0.115, p<0.001)
 
 ---
 
 
-## Related Work
 
-This work sits at the intersection of three research areas that have largely been studied separately:
 
-- **Causal ML**: Pearl (2000), DoWhy (Sharma & Kiciman, 2020), DECI (Microsoft, 2021)
-- **Neuro-Symbolic AI**: NS-CL (Mao et al., 2019), DeepProbLog, IBM NeSy systems
-- **ML-based Fault Detection**: CWRU benchmarks, NASA CMAPSS, predictive maintenance literature
 
-**Gap**: No unified framework applies Pearl's do-calculus *within* a neuro-symbolic pipeline specifically for fault diagnosis and applies JEPA to learn from it. CNSD addresses this gap.
+## Causal Identification
+
+Each domain uses backdoor adjustment with a domain-appropriate confounder. The identifying assumption — no unmeasured common cause between the treatment (feature norm) and outcome (fault) other than the named confounder — is validated empirically via placebo permutation test (1000 iterations). Results are reported with 95% bootstrap confidence intervals.
+
+Causal analysis is run on training data only. Test data is never used to estimate ATEs.
+
+---
+
+## Continual Learning Protocol
+
+Base model trained on CWRU classes 0–6 (Normal, Ball×3, IR×3) across loads 0–2. New task: OR faults (classes 7–9). N=100 samples per new class. EMA reference buffer computed on 500 base-class samples before adaptation begins.
+
+CCR-LoRA freezes early convolutional layers and trains a LoRA adapter on the feature layer, with a causal consistency penalty that penalizes drift in feature norm distributions relative to the pre-adaptation reference.
 
 ---
 
-## Author
+## Prototype Notebook
 
-**Abhimanyu Prasad** 
-**abhiprd20@gmail.com**
-High School Researcher | Independent AI Research
-Research interest: Causal AI, Neuro-Symbolic Systems, Explainable Fault Detection, NLP and low - resource languages
-
-*Research conducted independently.*
+This repo is entirely for the initial prototypes and archive notebooks. Some more unreleased notebooks will be uploaded soon.
 
 ---
+
+
 
 ## Citation
 
-Please cite:
+If you use this work, please cite:
 
+```bibtex
+@misc{cnsd2025,
+  title={CNSD: Causal Neuro-Symbolic Diagnosis},
+  author={[Author]},
+  year={2026},
+  note={Preprint}
+}
 ```
-  Author    = {Abhimanyu Prasad},
-  Title     = {Causal Neuro-Symbolic Diagnosis},
-  Year      = {2026}
-  
+
 ---
 
 ## License
 
-Apache 2.0 License — open for collaboration and academic use.
-
----
-
-> *Built by a high schooler who believes AI should not just predict, but understand and learn from the committed mistakes.*
+Apache 2.0
